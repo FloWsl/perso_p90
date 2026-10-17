@@ -1,6 +1,6 @@
 // Service worker minimal : cache de l'app pour le hors ligne.
 // Sert depuis le cache, puis met à jour en arrière-plan (la nouvelle version s'affiche au lancement suivant).
-const CACHE = 'p90log-v2';
+const CACHE = 'p90log-v3';
 const ASSETS = ['./', './index.html', './manifest.json', './icon-180.png', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', e => {
