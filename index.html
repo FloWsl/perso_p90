@@ -85,11 +85,6 @@ input,textarea{font:inherit;color:inherit}
 .chip.cur{border-color:var(--bone);color:var(--bone)}
 .chip.done{background:var(--venom);border-color:var(--venom);color:#000}
 .chip.done.sw{background:var(--ice);border-color:var(--ice)}
-.prog{display:flex;gap:6px;margin-top:14px}
-.prog .bar{height:6px;background:var(--wire);position:relative}
-.prog .bar i{position:absolute;inset:0 auto 0 0;background:var(--bone)}
-.prog span{display:block;font-size:13px;color:var(--ash);margin-top:6px;white-space:nowrap}
-.prog .cur span{color:var(--bone);font-weight:600}
 
 /* tiles */
 .grp{color:var(--ash);font-size:13px;margin:14px 0 6px}
@@ -144,7 +139,9 @@ input,textarea{font:inherit;color:inherit}
 .note{width:100%;min-height:80px;margin-top:8px;background:var(--slab);border:1px solid var(--wire);border-radius:0;padding:10px 12px;font-size:16px;-webkit-appearance:none;resize:vertical}
 .foot{position:sticky;bottom:0;margin:24px -16px 0;padding:12px 16px calc(12px + var(--sb));background:var(--void);border-top:1px solid var(--wire);z-index:20}
 .foot .go{margin-top:0}
-.danger{display:block;margin:20px 0 0;color:var(--ash);font-size:15px;text-decoration:underline;text-underline-offset:3px;min-height:40px}
+.trash{width:44px;height:44px;flex:none;display:flex;align-items:center;justify-content:center;color:var(--ash)}
+.trash svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:square}
+.trash:active{color:var(--venom)}
 
 /* évolution */
 .title{font:34px/1 var(--display);text-transform:uppercase;letter-spacing:.02em}
@@ -227,39 +224,38 @@ const letter = k => k.slice(-1);
 const fullName = k => isSweat(k) ? `${W[k].name} + ${W[k].abs}` : W[k].name;
 
 /* ---------- Planning P90 Sculpt ----------
-   Original : 13 semaines (phase A, B, C de 4 semaines puis semaine finale), 5 à 6 séances par semaine.
-   Ici : 2 ou 3 séances par semaine, toujours au moins 1 Sculpt et 1 Sweat + Ab Ripper.
-   Semaines 3-4 de la phase A : dominante Sweat, comme l'original. Un tour supplémentaire de A ou B peut être ajouté. */
-function schedule(){
-  const pw = db.perWeek, rep = db.repeat;
+   Original : cycle de 13 semaines (phases A, B, C de 4 semaines puis semaine Hit it), 5 à 6 séances par semaine.
+   Ici : 2 ou 3 séances par semaine, toujours au moins 1 Sculpt et 1 Sweat + Ab Ripper, et le cycle tourne en boucle.
+   Semaines 3-4 de la phase A : dominante Sweat, comme l'original.
+   db.shift recule la position dans le cycle quand on choisit de refaire une phase. */
+function cycle(){
+  const pw = db.perWeek;
   const week = (l, sweatHeavy) => pw === 2
     ? (sweatHeavy ? ['W'+l, l] : [l, 'W'+l])
     : (sweatHeavy ? ['W'+l, l, 'W'+l] : [l, 'W'+l, l]);
   const weeks = [];
-  for (let r = 0; r <= rep.A; r++) [0,0,1,1].forEach(h => weeks.push({ph:'A', r, slots: week('A', !!h)}));
-  for (let r = 0; r <= rep.B; r++) for (let i = 0; i < 4; i++) weeks.push({ph:'B', r, slots: week('B')});
-  for (let i = 0; i < 4; i++) weeks.push({ph:'C', r:0, slots: week('C')});
-  weeks.push({ph:'F', r:0, slots: pw === 2 ? ['C','WC'] : ['A','WB','C']});
+  [0,0,1,1].forEach(h => weeks.push({ph:'A', slots: week('A', !!h)}));
+  for (let i = 0; i < 4; i++) weeks.push({ph:'B', slots: week('B')});
+  for (let i = 0; i < 4; i++) weeks.push({ph:'C', slots: week('C')});
+  weeks.push({ph:'F', slots: pw === 2 ? ['C','WC'] : ['A','WB','C']});
   return weeks;
 }
-const PH = {A:'phase A', B:'phase B', C:'phase C', F:'semaine finale'};
+const PH = {A:'Phase A', B:'Phase B', C:'Phase C', F:'Hit it'};
 function plan(){
-  const weeks = schedule(), slots = [];
-  weeks.forEach((w, wi) => w.slots.forEach((k, si) => slots.push({k, wi, si, ph: w.ph, r: w.r})));
-  const done = db.sessions.length, finished = done >= slots.length, next = finished ? null : slots[done];
-  const wi = next ? next.wi : weeks.length - 1;
-  let photo = 0;
-  if (next){
-    const prev = slots[done - 1];
-    if (done === 0) photo = 1;
-    else if (done === slots.length - 1) photo = 90;
-    else if (prev.ph !== next.ph && next.ph === 'B') photo = 30;
-    else if (prev.ph !== next.ph && next.ph === 'C') photo = 60;
-  }
-  const prevWeek = next && next.si === 0 && next.wi > 0 ? weeks[next.wi - 1] : null;
-  const canRepeat = prevWeek && prevWeek.ph !== next.ph && (prevWeek.ph === 'A' || prevWeek.ph === 'B') ? prevWeek.ph : null;
-  return {pw: db.perWeek, weeks, slots, done, total: slots.length, finished, next, wi, weekStart: slots.findIndex(s => s.wi === wi), photo, canRepeat};
+  const pw = db.perWeek, weeks = cycle(), slots = [];
+  weeks.forEach((w, wi) => w.slots.forEach((k, si) => slots.push({k, wi, si, ph: w.ph})));
+  const L = slots.length, done = db.sessions.length;
+  const pos = ((done - db.shift) % L + L) % L, next = slots[pos], phase = WEEKS_PER_PHASE * pw;
+  const rewound = db.repeatAt === done; // phase relancée à l'instant : ni photos ni nouvelle proposition
+  return {
+    pw, next, done,
+    slots: weeks[next.wi].slots,
+    week: Math.floor(done / pw) + 1,
+    photo: rewound ? 0 : pos === 0 ? 1 : pos === phase ? 30 : pos === 2 * phase ? 60 : pos === L - 1 ? 90 : 0,
+    canRepeat: rewound ? null : pos === phase ? 'A' : pos === 2 * phase ? 'B' : null
+  };
 }
+const WEEKS_PER_PHASE = 4;
 
 /* ---------- Stockage ---------- */
 const KEY = 'p90log.v1';
@@ -270,11 +266,13 @@ function cleanSets(s){ // retire les anciennes coches (v1) et les entrées vides
 function normalize(d){
   d = d && typeof d === 'object' ? d : {};
   const ok = s => s && W[s.w] && typeof s.id === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s.date) && s.sets && typeof s.sets === 'object';
-  const rep = d.repeat || {}, int = n => Math.max(0, Math.min(3, Number(n) || 0));
+  const pw = d.perWeek === 2 ? 2 : 3, rep = d.repeat || {};
+  const shift = d.shift != null ? Math.max(0, Number(d.shift) || 0) : ((Number(rep.A) || 0) + (Number(rep.B) || 0)) * 4 * pw;
   return {
     v:1,
-    perWeek: d.perWeek === 2 ? 2 : 3,
-    repeat: {A: int(rep.A), B: int(rep.B)},
+    perWeek: pw,
+    shift,
+    repeatAt: Number.isInteger(d.repeatAt) ? d.repeatAt : null,
     lastExport: d.lastExport || null,
     sessions: Array.isArray(d.sessions) ? d.sessions.filter(ok).map(cleanSets) : [],
     draft: ok(d.draft) ? cleanSets(d.draft) : null
@@ -371,39 +369,30 @@ function viewHome(){
       <p class="meta">${sw ? 'Termine-la pour la compter.' : `${n} exercice${n>1?'s':''} saisi${n>1?'s':''} sur ${W[d.w].ex.length}`}</p>
       <button class="go" data-act="resume">Reprendre</button>
       <button class="link" data-act="abandon">Abandonner</button></section>`;
-  } else if (p.finished){
-    hero = `<section class="hero"><div class="glyph" aria-hidden="true">90</div>
-      <p class="kicker">Programme bouclé</p><h1>Hit it!</h1>
-      <p class="meta">${p.done} séances faites. Relance n'importe quelle séance ci-dessous.</p></section>`;
   } else {
     const k = p.next.k, sw = isSweat(k);
     const alt = k === 'B' || k === 'C' ? 'S' : k === 'WB' || k === 'WC' ? 'WS' : null;
     hero = `<section class="hero"><div class="glyph${sw ? ' sw' : ''}" aria-hidden="true">${letter(k)}</div>
       <p class="kicker">Prochaine séance</p>
       <h1>${W[k].name}</h1>${sw ? `<p class="abs">+ ${W[k].abs}</p>` : ''}
-      <p class="meta">Semaine ${p.wi+1}/${p.weeks.length}, ${PH[p.next.ph]}${p.next.r ? ' (tour ' + (p.next.r+1) + ')' : ''}</p>
+      <p class="meta">${PH[p.next.ph]}</p>
       ${p.photo ? `<p class="photo">Jour ${p.photo} : photos avant la séance</p>` : ''}
       <button class="go" data-act="start" data-arg="${k}">Démarrer</button>
       ${alt ? `<button class="link" data-act="start" data-arg="${alt}">Faire ${W[alt].name} à la place</button>` : ''}
-      ${p.canRepeat ? `<button class="link" data-act="repeat" data-arg="${p.canRepeat}">Pas encore à l'aise en phase ${p.canRepeat} ? Refaire 4 semaines</button>` : ''}
+      ${p.canRepeat ? `<button class="link" data-act="repeat" data-arg="${p.canRepeat}">Pas encore à l'aise en phase ${p.canRepeat} ? La refaire 4 semaines</button>` : ''}
     </section>`;
   }
   // Semaine calendaire : un trait par séance, couleur = type
   const dots = Array.from({length: Math.max(p.pw, wk)}, (_,i) => `<b class="${i < wk ? (isSweat(wkSessions[i].w) ? 'sw' : 'sc') : ''}"></b>`).join('');
-  // Semaine du programme : séances prévues, cochées au fil de l'eau
+  // Semaine du programme : séances prévues, remplacées par la séance réellement faite
   const ch = chrono();
-  const chips = p.weeks[p.wi].slots.map((k, si) => {
-    const idx = p.weekStart + si, doneS = idx < p.done ? ch[idx] : null, key = doneS ? doneS.w : k;
-    const cls = doneS ? 'done' + (isSweat(key) ? ' sw' : '') : idx === p.done ? 'cur' : '';
+  const chips = p.slots.map((k, si) => {
+    const doneS = si < p.next.si ? ch[p.done - p.next.si + si] : null, key = doneS ? doneS.w : k;
+    const cls = doneS ? 'done' + (isSweat(key) ? ' sw' : '') : si === p.next.si ? 'cur' : '';
     return `<span class="chip ${cls}">${W[key].name}</span>`;
   }).join('');
-  // Phases du programme
-  const groups = [];
-  p.slots.forEach((s, i) => { const g = groups[groups.length-1]; if (g && g.ph === s.ph) { g.n++; if (i < p.done) g.d++; } else groups.push({ph: s.ph, n: 1, d: i < p.done ? 1 : 0}); });
-  const curPh = p.next ? p.next.ph : null;
-  const phases = groups.map(g => `<div class="${g.ph === curPh ? 'cur' : ''}" style="flex:${g.n}"><div class="bar"><i style="width:${g.d/g.n*100}%"></i></div><span>${g.ph === 'F' ? 'Final' : 'Phase ' + g.ph}${db.repeat[g.ph] ? ' ×' + (db.repeat[g.ph] + 1) : ''}</span></div>`).join('');
 
-  const nextK = !d && p.next ? p.next.k : null;
+  const nextK = d ? null : p.next.k;
   const tile = k => `<button class="tile${k === nextK ? ' next' : ''}" data-act="start" data-arg="${k}">
       <span class="l${isSweat(k) ? ' sw' : ''}" aria-hidden="true">${letter(k)}</span><small>${k.endsWith('S') ? 'Speed' : W[k].name}</small></button>`;
   const recent = chrono().reverse().slice(0,5);
@@ -414,9 +403,8 @@ function viewHome(){
   return `<header class="top"><span class="brand"><i></i>P90 LOG</span></header>
     ${hero}
     <section class="sec">
-      <div class="sec-h"><h3>Programme, semaine ${p.wi+1}</h3><span class="num">${Math.min(p.done,p.total)}/${p.total}</span></div>
+      <div class="sec-h"><h3>Semaine ${p.week}</h3></div>
       <div class="chips">${chips}</div>
-      <div class="prog">${phases}</div>
     </section>
     <section class="sec">
       <div class="sec-h"><h3>Cette semaine</h3><span class="num">${wk}/${p.pw}</span></div>
@@ -428,7 +416,7 @@ function viewHome(){
           <button class="${p.pw===2?'on':''}" data-act="pw" data-arg="2" aria-pressed="${p.pw===2}">2</button>
           <button class="${p.pw===3?'on':''}" data-act="pw" data-arg="3" aria-pressed="${p.pw===3}">3</button>
         </div></div>
-      <p class="hint">Séances par semaine. Le planning P90 de 13 semaines (phases A, B, C puis semaine finale) est réparti sur ${p.pw} séances, avec chaque semaine au moins 1 Sculpt et 1 Sweat + Ab Ripper. En phases B et C, Speed Sculpt et Speed Sweat peuvent remplacer la séance du même type.</p>
+      <p class="hint">Séances par semaine, avec toujours au moins 1 Sculpt et 1 Sweat + Ab Ripper. Le planning P90 tourne en boucle : 4 semaines en phase A, 4 en B, 4 en C, une semaine Hit it, puis retour en A. En phases B et C, Speed Sculpt et Speed Sweat peuvent remplacer la séance du même type.</p>
     </section>
     <section class="sec"><div class="sec-h"><h3>Lancer une autre séance</h3></div>
       <p class="grp">Sculpt</p><div class="tiles">${SCULPTS.map(tile).join('')}</div>
@@ -465,11 +453,11 @@ function viewSession(){
   }).join('');
   const hint = sw ? '' : `<p class="hint">${p ? `En gris : ta séance du ${fmtDate(p.date, {day:'numeric', month:'long'})}. Fais mieux.` : 'Première fois sur cette séance : pose ta référence. Sur les exercices chronométrés, note tes reps.'}</p>`;
   return `<header class="top stick"><button class="back" data-act="back" aria-label="Retour">‹</button><h2>${wk.name}</h2>
-      <input class="date" type="date" id="date" value="${d.date}" max="${today()}" aria-label="Date de la séance"></header>
+      <input class="date" type="date" id="date" value="${d.date}" max="${today()}" aria-label="Date de la séance">
+      <button class="trash" data-act="del" aria-label="${isEdit(d) ? 'Supprimer la séance' : 'Abandonner la séance'}"><svg viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v6M14 11v6"/></svg></button></header>
     ${hint}${rows}
     <section class="sec"><label for="note" class="sec-h"><h3>Note</h3></label>
-      <textarea id="note" class="note" placeholder="${sw ? 'Sensations, abdos faits ou non…' : 'Élastique utilisé, sensations, douleurs…'}">${esc(d.note || '')}</textarea>
-      ${isEdit(d) ? '<button class="danger" data-act="del">Supprimer cette séance</button>' : ''}</section>
+      <textarea id="note" class="note" placeholder="${sw ? 'Sensations, abdos faits ou non…' : 'Élastique utilisé, sensations, douleurs…'}">${esc(d.note || '')}</textarea></section>
     <div class="foot"><button class="go" data-act="finish">${isEdit(d) ? 'Enregistrer' : 'Terminer la séance'}</button></div>`;
 }
 
@@ -575,8 +563,8 @@ const act = {
     db.draft = null; save(); render();
   },
   repeat(ph){
-    if (!confirm(`Ajouter 4 semaines de phase ${ph} avant de passer à la suite ?`)) return;
-    db.repeat[ph] = Math.min(3, db.repeat[ph] + 1); save(); render(); toast(`4 semaines de phase ${ph} ajoutées`);
+    if (!confirm(`Refaire 4 semaines de phase ${ph} avant de passer à la suite ?`)) return;
+    db.shift += WEEKS_PER_PHASE * db.perWeek; db.repeatAt = db.sessions.length; save(); render(); toast(`Phase ${ph} relancée pour 4 semaines`);
   },
   back(){ go(ui.from); },
   tab(v){ go(v); },
@@ -592,9 +580,12 @@ const act = {
     go(ui.from);
   },
   del(){
-    if (!confirm('Supprimer cette séance ? Cette action est définitive.')) return;
-    db.sessions = db.sessions.filter(s => s.id !== db.draft.id); db.draft = null; save();
-    toast('Séance supprimée'); go(ui.from);
+    const edit = isEdit(db.draft);
+    if (edit ? !confirm('Supprimer cette séance ? Cette action est définitive.')
+             : hasData(db.draft) && !confirm('Abandonner la séance ? Les valeurs saisies seront perdues.')) return;
+    if (edit) db.sessions = db.sessions.filter(s => s.id !== db.draft.id);
+    db.draft = null; save();
+    toast(edit ? 'Séance supprimée' : 'Séance abandonnée'); go(ui.from);
   },
   pw(n){ db.perWeek = Number(n) === 2 ? 2 : 3; save(); render(); },
   metric(m){ ui.metric = m; render(); },
